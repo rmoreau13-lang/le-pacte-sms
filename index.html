@@ -609,6 +609,7 @@ function shortcutHref(name, items) {
 /* ============================================================
    Le Pacte SMS — interface
    ============================================================ */
+const ROBOT_PAUSE = 20;
 const UI = { view: 'listes', openList: null, imp: null, lsearch: '', vsearch: '', sel: null, sfilter: 'all', ifilter: 'pb', qr: null, qrPart: 0, awaitingReturn: false };
 
 function device() { return DB.settings.device || (IS_IOS ? 'iphone' : 'pc'); }
@@ -969,17 +970,26 @@ function modeB(c, R) {
   const b = c.batch;
   let inner;
   if (b) {
-    inner = '<div class="note warn"><strong>Lot de ' + b.keys.length + ' messages confié au Raccourci à ' + fmtDate(b.t) + '.</strong> Ouvrez Messages et vérifiez qu\'ils sont partis, puis indiquez le résultat. Aucun nouveau lot ne partira avant.</div>' +
+    const mins = Math.ceil(b.keys.length * (ROBOT_PAUSE + 3) / 60);
+    inner = (b.robot
+      ? '<div class="note warn"><strong>Robot lancé à ' + fmtDate(b.t) + ' pour ' + b.keys.length + ' messages (environ ' + mins + ' min).</strong> Laissez l\'iPhone déverrouillé, dans Raccourcis, jusqu\'à la fin. Ensuite ouvrez Messages, vérifiez que les derniers destinataires ont bien reçu le leur, puis indiquez le résultat ici.</div>'
+      : '<div class="note warn"><strong>Lot de ' + b.keys.length + ' messages confié au Raccourci à ' + fmtDate(b.t) + '.</strong> Ouvrez Messages et vérifiez qu\'ils sont partis, puis indiquez le résultat. Aucun nouveau lot ne partira avant.</div>') +
       '<div class="small">' + b.keys.map(e => { const r = R.find(x => x.e164 === e); return esc(r ? capName(r.prenom) + ' ' + r.nom : displayE164(e)); }).join(' · ') + '</div>' +
-      '<div class="row"><button class="btn primary big" data-act="bDone">Tous sont partis</button><button class="btn big" data-act="bCheck">Problème ou doute : à vérifier</button></div>' +
+      '<div class="row"><button class="btn primary big" data-act="bDone">Tous sont partis</button><button class="btn big" data-act="bCheck">' + (b.robot ? 'Le robot s\'est arrêté ou doute' : 'Problème ou doute') + ' : à vérifier</button></div>' +
       '<p class="tiny muted">« À vérifier » : chaque personne du lot passe en rouge ; vous corrigez ensuite une par une dans la liste.</p>';
   } else if (!todo.length) inner = '<div class="note ok">Plus personne à préparer.</div>';
   else {
-    inner = '<div class="row"><label class="f" for="bsize" style="max-width:220px">Taille du lot<select id="bsize" data-on="bSize">' + [1, 5, 10, 15, 20].map(n => '<option' + (n === size ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label></div>' +
+    const est = Math.ceil(todo.length * (ROBOT_PAUSE + 3) / 60);
+    const robot = c.paused ? '' : '<div class="recipient stack" style="gap:10px"><div class="who">Robot : envoyer les ' + todo.length + ' restants</div>' +
+      '<p class="small">Un seul lancement. Le Raccourci envoie un SMS individuel à chacun, avec une pause de ' + ROBOT_PAUSE + ' s entre deux messages (environ ' + est + ' min au total). Les personnes déjà traitées sont exclues.</p>' +
+      (UI.robotKeys && UI.robotKeys.length
+        ? '<div class="note ok small"><strong>Liste de ' + UI.robotKeys.length + ' destinataires prête.</strong> Touchez maintenant « Lancer le robot ». Gardez l\'iPhone déverrouillé pendant l\'envoi.</div><a class="btn primary big wide" href="' + esc('shortcuts://run-shortcut?name=' + encodeURIComponent(DB.settings.shortcut) + '&input=clipboard') + '" data-act="robotGo">2. Lancer le robot</a><button class="btn sm quiet" data-act="robotCancel">Annuler</button>'
+        : '<button class="btn primary big wide" data-act="robotCopy">1. Préparer le robot</button><p class="tiny muted">Copie la liste dans le presse-papiers de l\'iPhone (rien n\'est envoyé à ce stade).</p>') + '</div>';
+    inner = robot + '<details class="box"><summary>Ou par petits lots</summary><div class="in stack"><div class="row"><label class="f" for="bsize" style="max-width:220px">Taille du lot<select id="bsize" data-on="bSize">' + [1, 5, 10, 15, 20].map(n => '<option' + (n === size ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label></div>' +
       (c.paused ? '<div class="note warn">Campagne en pause.</div>' : '<button class="btn primary big wide" data-act="bLaunch">Préparer le lot suivant (' + Math.min(size, todo.length) + ' messages)</button>') +
-      '<p class="tiny muted">Reste ' + todo.length + ' à préparer. Laissez quelques minutes entre deux lots.</p>';
+      '<p class="tiny muted">Reste ' + todo.length + ' à préparer. Laissez quelques minutes entre deux lots.</p></div></details>';
   }
-  return '<details class="box"' + (b ? ' open' : '') + '><summary>Mode B · En série avec le Raccourci « ' + esc(DB.settings.shortcut) + ' »</summary><div class="in stack">' +
+  return '<details class="box"' + (b || UI.robotKeys ? ' open' : '') + '><summary>Mode B · Robot d\'envoi (Raccourci « ' + esc(DB.settings.shortcut) + ' »)</summary><div class="in stack">' +
     '<div class="note info small">Le lancement se fait <strong>sur l\'iPhone</strong>. Le Raccourci doit avoir été créé une fois (voir <button class="linkbtn" data-act="go" data-view="aide">Aide</button>). Il envoie chaque message séparément depuis Messages, avec votre ligne. <strong>Commencez par le test.</strong></div>' +
     '<button class="btn" data-act="bTest">Tester le Raccourci sur mon numéro</button>' + inner + '</div></details>';
 }
@@ -1102,7 +1112,7 @@ VIEWS.aide = () => '<div class="stack" style="max-width:860px"><h2>Mode d\'emplo
   '<details class="box" open><summary>Installer l\'application sur l\'iPhone (une fois)</summary><div class="in"><ol class="steps-list small"><li>Ouvrez l\'adresse de l\'application dans <strong>Safari</strong>.</li><li>Touchez le bouton Partager, puis <strong>Sur l\'écran d\'accueil</strong>. Laissez « Ouvrir comme app web » activé.</li><li>Ouvrez désormais Le Pacte SMS depuis cette icône.</li></ol></div></details>' +
   '<details class="box"><summary>Réglage Messages conseillé (une fois)</summary><div class="in"><ol class="steps-list small"><li>Réglages › Apps › Messages › <strong>Envoi et réception</strong>.</li><li>Cochez votre numéro 06 09 71 27 91 et, sous « Démarrer les nouvelles conversations avec », choisissez ce numéro (pas votre adresse e-mail).</li></ol><p class="small muted">Ainsi les iMessages partent aussi sous votre numéro et les réponses arrivent dans le bon fil.</p></div></details>' +
   '<details class="box"><summary>Créer le Raccourci « Le Pacte SMS » (mode B, une fois, ~5 minutes)</summary><div class="in stack small">' +
-  '<p>Apple ne permet pas d\'installer un Raccourci signé sans Mac ; il faut donc le créer sur l\'iPhone. Il a 6 actions. Les noms peuvent varier légèrement selon la version d\'iOS : tapez le mot indiqué dans la recherche d\'actions.</p>' +
+  '<p>Apple ne permet pas d\'installer un Raccourci signé sans Mac ; il faut donc le créer sur l\'iPhone. Il a 7 actions. Les noms peuvent varier légèrement selon la version d\'iOS : tapez le mot indiqué dans la recherche d\'actions.</p>' +
   '<ol class="steps-list"><li>Réglages › Apps › Raccourcis › Avancé : activez <strong>Autoriser le partage de grandes quantités de données</strong>.</li>' +
   '<li>Ouvrez <strong>Raccourcis</strong>, touchez <kbd>+</kbd>. Touchez le titre et nommez-le exactement : <strong>Le Pacte SMS</strong>.</li>' +
   '<li>Cherchez <em>dictionnaire</em> → <strong>Obtenir le dictionnaire à partir de l\'entrée</strong>. Touchez « Entrée » et choisissez <strong>Entrée du raccourci</strong>.</li>' +
@@ -1111,7 +1121,9 @@ VIEWS.aide = () => '<div class="stack" style="max-width:860px"><h2>Mode d\'emplo
   '<li>Dans la boucle : <strong>Obtenir la valeur du dictionnaire</strong>, clé <code>numero</code>, dictionnaire = <strong>Élément de répétition</strong>.</li>' +
   '<li>Dans la boucle : <strong>Obtenir la valeur du dictionnaire</strong>, clé <code>texte</code>, dictionnaire = <strong>Élément de répétition</strong> (touchez le champ pour le choisir).</li>' +
   '<li>Dans la boucle : cherchez <em>message</em> → <strong>Envoyer un message</strong>. Le texte proposé est la valeur de l\'étape précédente. Touchez « Destinataires » → <strong>Sélectionner une variable</strong> → touchez le résultat de l\'action <code>numero</code>. Ouvrez la flèche <kbd>›</kbd> et <strong>désactivez « Afficher lors de l\'exécution »</strong>.</li>' +
+  '<li>Toujours dans la boucle, sous « Envoyer un message » : cherchez <em>attendre</em> → <strong>Attendre</strong>, réglez <strong>20 secondes</strong>. C\'est la pause du robot entre deux SMS.</li>' +
   '<li>Touchez OK. Revenez dans Le Pacte SMS › Envoyer › Mode B › <strong>Tester le Raccourci sur mon numéro</strong>. À la première exécution, iOS peut demander l\'autorisation d\'envoyer : répondez <strong>Toujours autoriser</strong>.</li></ol>' +
+  '<p><strong>Pendant que le robot tourne</strong> : iPhone branché, déverrouillé, écran allumé (Réglages › Luminosité et affichage › Verrouillage automatique : Jamais, le temps de l\'envoi), et restez dans Raccourcis. iOS peut interrompre un raccourci si l\'iPhone se verrouille ou si vous changez d\'app.</p>' +
   '<p class="muted">Ce que reçoit le Raccourci : <code>{"liste":[{"numero":"+336…","texte":"…"}]}</code>, un lot à la fois. Il n\'a pas accès au reste de vos données.</p></div></details>' +
   '<details class="box"><summary>Limites à connaître</summary><div class="in small stack"><p>Le préremplissage du texte dans Messages par un lien web n\'est pas documenté par Apple : il fonctionne en pratique, d\'où le bouton « Copier le texte » en secours.</p><p>L\'application ne sait jamais si un SMS est réellement parti ou arrivé : seul votre contrôle dans Messages fait foi.</p><p>Envoyez des volumes raisonnables (lots espacés) : les forfaits « SMS illimités » interdisent les envois automatisés en masse et plafonnent souvent à 200 destinataires différents par mois.</p><p>Prospection : ces messages s\'adressent à des professionnels et doivent concerner leur activité ; retirez de vos listes toute personne qui demande à ne plus être contactée.</p></div></details></div>';
 
@@ -1259,6 +1271,23 @@ ACT.bLaunch = async () => {
   if (v !== 'go') return;
   lot.forEach(r => setStatus(c, r.e164, 'prepared', 'raccourci'));
   c.batch = { keys: lot.map(r => r.e164), t: Date.now() }; save(); setTimeout(render, 300);
+};
+ACT.robotCopy = async () => {
+  const c = curCamp(); if (c.paused || c.batch) return;
+  const lot = recipientsOf(c).active.filter(r => statusOf(c, r.e164) === 'todo');
+  if (!lot.length) return;
+  const json = JSON.stringify({ liste: lot.map(r => ({ numero: r.e164, texte: personalize(c.message, r, c.cap) })) });
+  const ok = await copyText(json);
+  if (!ok) return toast('Copie impossible sur cet appareil. Utilisez l\'envoi par petits lots.');
+  UI.robotKeys = lot.map(r => r.e164); render(); toast(plural(lot.length, 'destinataire prêt', 'destinataires prêts') + '. Aucun SMS envoyé pour l\'instant.');
+};
+ACT.robotCancel = () => { UI.robotKeys = null; copyText(' '); render(); };
+ACT.robotGo = (b, e) => {
+  const c = curCamp(); if (c.paused || c.batch || !UI.robotKeys) { e.preventDefault(); return; }
+  const keys = UI.robotKeys.filter(k => statusOf(c, k) === 'todo');
+  keys.forEach(k => setStatus(c, k, 'prepared', 'robot'));
+  c.batch = { keys, t: Date.now(), robot: true }; UI.robotKeys = null; save();
+  setTimeout(render, 400);
 };
 ACT.bDone = () => { const c = curCamp(); if (!c.batch) return; c.batch.keys.forEach(e => setStatus(c, e, 'confirmed', 'vous (lot)')); c.batch = null; save(); render(); toast('Lot confirmé.'); };
 ACT.bCheck = () => { const c = curCamp(); if (!c.batch) return; c.batch.keys.forEach(e => setStatus(c, e, 'check', 'vous (lot)')); c.batch = null; save(); render(); toast('Lot à vérifier : corrigez chaque statut dans la liste.'); };
